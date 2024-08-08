@@ -1,0 +1,211 @@
+import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+import 'dart:convert';
+import 'package:flick_video_player/flick_video_player.dart';
+import 'package:video_player/video_player.dart';
+
+class DisplayVideos extends StatefulWidget {
+  @override
+  _DisplayVideosState createState() => _DisplayVideosState();
+}
+
+class _DisplayVideosState extends State<DisplayVideos> {
+  List<Map<String, dynamic>> _videos = [];
+  List<VideoPlayerController?> _controllers = [];
+  late Image _thumbnailImage;
+  @override
+  void initState() {
+    super.initState();
+    _fetchVideos();
+  }
+
+  Future<void> _fetchVideos() async {
+    try {
+      final response = await http.post(
+        Uri.parse('http://172.18.21.34:80/app/displayVideo.php'),
+      );
+
+      if (response.statusCode == 200) {
+        final jsonData = json.decode(response.body);
+        if (jsonData is List<dynamic>) {
+          setState(() {
+            _videos = List<Map<String, dynamic>>.from(jsonData);
+            _controllers = _videos.map((video) {
+              final videoUrl = video['url'] as String?;
+              if (videoUrl != null) {
+                print("1");
+                return VideoPlayerController.network(
+                  'http://172.18.21.34:80/app /$videoUrl',
+                )..initialize().then((_) {
+                  setState(() {}); // Rebuild the widget after initialization
+                }).catchError((error) {
+                  print('Error initializing video: $error');
+                  // Handle error gracefully
+                });
+              } else {
+                print('Skipping video with null URL');
+                return null;
+              }
+            }).toList();
+          });
+        } else {
+          throw Exception('Invalid JSON data format');
+        }
+      } else {
+        throw Exception('Failed to load videos: ${response.statusCode}');
+        // Handle HTTP error gracefully
+      }
+    } catch (e) {
+      print('Error fetching videos: $e');
+
+      // Handle network error gracefully
+    }
+  }
+
+  @override
+  void dispose() {
+    for (final controller in _controllers) {
+      controller?.removeListener(_videoPlayerListener);
+      controller?.dispose();
+    }
+    super.dispose();
+  }
+
+  void _videoPlayerListener() {
+    for (final controller in _controllers) {
+      if (controller != null && controller.value.hasError) {
+        print('Video player encountered an error: ${controller.value.errorDescription}');
+        // Handle video playback error gracefully
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Text('Watch Videos'),
+      ),
+      body: ListView.builder(
+        itemCount: _controllers.length,
+        itemBuilder: (context, index) {
+          final controller = _controllers[index];
+          if (controller != null && controller.value.isInitialized) {
+            return VideoPlayerWidget(controller: controller);
+          } else {
+            return SizedBox.shrink(); // Return an empty widget for null or uninitialized controllers
+          }
+        },
+      ),
+    );
+  }
+}
+
+class VideoPlayerWidget extends StatefulWidget {
+  final VideoPlayerController? controller;
+
+  const VideoPlayerWidget({required this.controller});
+
+  @override
+  _VideoPlayerWidgetState createState() => _VideoPlayerWidgetState();
+}
+
+class _VideoPlayerWidgetState extends State<VideoPlayerWidget> {
+  late FlickManager _flickManager;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.controller != null) {
+      _flickManager = FlickManager(
+        videoPlayerController: widget.controller!,
+      );
+      widget.controller!.addListener(_videoPlayerListener);
+      widget.controller!.initialize().then((_) {
+        setState(() {}); // Rebuild the widget after initialization
+      }).catchError((error) {
+        print('Error initializing video: $error');
+        // Handle video initialization error gracefully
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _flickManager.dispose();
+    widget.controller?.removeListener(_videoPlayerListener);
+    widget.controller?.dispose();
+    super.dispose();
+  }
+
+  void _videoPlayerListener() {
+    if (widget.controller != null && widget.controller!.value.hasError) {
+      print('Video player encountered an error: ${widget.controller!.value.errorDescription}');
+      // Handle video playback error gracefully
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (widget.controller == null) {
+      return Center(
+        child: Text('No video available'),
+      );
+    } else {
+        return AspectRatio(
+          aspectRatio: 16 / 9,
+          child: FlickVideoPlayer(
+            flickManager: _flickManager,
+            flickVideoWithControls: FlickVideoWithControls(
+              playerLoadingFallback: Center(
+                child: CircularProgressIndicator(),
+              ),
+            ),
+          ),
+        );
+    }
+  }
+}
+
+
+
+
+
+<?php
+require("conn.php");
+
+if ($_SERVER["REQUEST_METHOD"] == "POST") {
+    // Check connection
+    if ($conn->connect_error) {
+        die("Connection failed: " . $conn->connect_error);
+    }
+
+    // Query to get all video information
+    $sql = "SELECT * FROM videos";
+    $result = mysqli_query($conn,$sql);
+
+    if ($result->num_rows > 0) {
+        $videosArray = array();
+
+        // Fetch all rows and store in an array
+        while ($row = $result->fetch_assoc()) {
+            $videoItem = array(
+              
+                'url' => $row['uVideos']    
+                // Add other video information as needed
+            );
+            $videosArray[] = $videoItem;
+        }
+
+        // Return videos data as JSON response
+        header('Content-Type: application/json');
+        echo json_encode($videosArray);
+    } else {
+        echo "No videos found";
+    }
+
+    $conn->close();
+} else {
+    echo "Invalid request";
+}
+?>
